@@ -204,7 +204,18 @@ main{max-width:1080px;margin:0 auto;padding:22px 18px 80px}
 .colonne{border:1px solid var(--trait);border-radius:8px;background:#fbfaf6;min-height:110px;padding:8px}
 .colonne h4{margin:0 0 8px;font-size:.9rem;text-align:center;padding:6px;background:var(--encre);color:#fff;border-radius:6px;cursor:pointer}
 .colonne.vise h4{background:var(--juste)}
-.pioche{display:flex;gap:8px;flex-wrap:wrap}
+.pioche{display:flex;gap:8px;flex-wrap:wrap;min-height:34px}
+.colonne.reserve{background:#fff;border-style:dashed;border-color:var(--trait-fort);margin-top:6px}
+.colonne.reserve h4{background:var(--encre-2)}
+.jeton.place{padding-right:26px;position:relative}
+.jeton.place::after{
+  content:"\00d7";position:absolute;right:8px;top:50%;transform:translateY(-50%);
+  color:var(--encre-2);font-weight:700;
+}
+.jeton.ok::after,.jeton.ko::after{content:""}
+.lu{cursor:pointer;border-radius:3px;padding:0 1px}
+.lu:hover{background:#eceadf}
+.tete-lecon{display:flex;gap:10px;align-items:center;margin-bottom:12px}
 .jeton{
   background:#fff;border:1px solid var(--trait-fort);border-radius:8px;padding:6px 11px;cursor:pointer;
   text-align:left;
@@ -451,6 +462,32 @@ function btnHautParleur(texte, titre) {
   b.onclick = function (ev) { ev.stopPropagation(); parler(typeof texte === 'function' ? texte() : texte, true); };
   return b;
 }
+/** Transforme un texte en suite de mots cliquables, chacun lu à voix haute. */
+function motsLisibles(texte) {
+  var frag = document.createDocumentFragment();
+  String(texte).split(/(\s+)/).forEach(function (bout) {
+    if (bout === '') return;
+    if (/^\s+$/.test(bout)) { frag.appendChild(document.createTextNode(bout)); return; }
+    var s = el('span', 'lu', bout);
+    s.onclick = function (ev) { ev.stopPropagation(); parler(bout); };
+    frag.appendChild(s);
+  });
+  return frag;
+}
+/** Rend cliquable chaque mot déjà présent dans un fragment de HTML (leçons). */
+function rendreLisible(racine) {
+  var aTraiter = [];
+  (function parcours(n) {
+    for (var k = 0; k < n.childNodes.length; k++) {
+      var c = n.childNodes[k];
+      if (c.nodeType === 3) { if (c.nodeValue.trim()) aTraiter.push(c); }
+      else if (c.nodeType === 1 && c.tagName !== 'BUTTON') parcours(c);
+    }
+  })(racine);
+  aTraiter.forEach(function (t) { t.parentNode.replaceChild(motsLisibles(t.nodeValue), t); });
+  return racine;
+}
+
 /** Nettoie un libellé avant lecture (balises d'exercice, tirets décoratifs). */
 function pourLire(s) {
   return String(s).replace(/[<>{}\[\]]/g, ' ').replace(/\s*\|\s*/g, ' ').replace(/^[\s-]+/, '').replace(/\s+/g, ' ').trim();
@@ -615,7 +652,7 @@ function moteurTrous(ec) {
       if (ligne[i] === '<') {
         var fin = ligne.indexOf('>', i + 1);
         if (fin > i) {
-          if (tampon) { p.appendChild(document.createTextNode(tampon)); tampon = ''; }
+          if (tampon) { p.appendChild(motsLisibles(tampon)); tampon = ''; }
           var rep = ligne.slice(i + 1, fin);
           reponses.push(rep);
           p.appendChild(faireTrou(rep));
@@ -625,7 +662,7 @@ function moteurTrous(ec) {
       }
       tampon += ligne[i]; i++;
     }
-    if (tampon) p.appendChild(document.createTextNode(tampon));
+    if (tampon) p.appendChild(motsLisibles(tampon));
     corps.appendChild(p);
   });
 
@@ -744,6 +781,7 @@ function moteurAssocie(ec) {
       b.setAttribute('aria-pressed', 'false');
       b.onclick = function () {
         parler(pourLire(it));
+        if (b.place >= 0) { reprendre(b); return; }
         choisi = choisi === b ? null : b;
         jetons.forEach(function (x) { x.setAttribute('aria-pressed', String(x === choisi)); });
       };
@@ -763,20 +801,41 @@ function moteurAssocie(ec) {
     colonnes.appendChild(col);
   });
 
+  function reprendre(b) {
+    b.place = -1;
+    b.classList.remove('place');
+    b.setAttribute('aria-pressed', 'false');
+    reserve.appendChild(b);
+    if (choisi === b) choisi = null;
+    majReserve();
+  }
+  function majReserve() {
+    var reste = jetons.filter(function (x) { return x.place < 0; }).length;
+    titreReserve.textContent = reste ? 'À classer (' + reste + ')' : 'Tout est classé';
+  }
   function deposer(idx) {
     if (!choisi) return;
     choisi.place = idx;
+    choisi.classList.add('place');
     choisi.setAttribute('aria-pressed', 'false');
     zones[idx].appendChild(choisi);
     choisi = null;
     jetons.forEach(function (x) { x.setAttribute('aria-pressed', 'false'); });
+    majReserve();
   }
-  pioche.onclick = function (e) { if (e.target === pioche && choisi) { choisi.place = -1; pioche.appendChild(choisi); choisi = null; } };
 
-  var aide = el('p', 'aide-txt', 'Choisissez une étiquette, puis cliquez le titre de la colonne.');
-  corps.appendChild(pioche);
+  var reserve = pioche;
+  var blocReserve = el('div', 'colonne reserve');
+  var titreReserve = el('h4', null, 'À classer');
+  titreReserve.onclick = function () { if (choisi) reprendre(choisi); };
+  blocReserve.appendChild(titreReserve);
+  blocReserve.appendChild(reserve);
+
+  var aide = el('p', 'aide-txt', 'Choisissez une étiquette, puis cliquez le titre d’une colonne. Pour corriger, cliquez l’étiquette placée : elle revient dans la réserve.');
+  corps.appendChild(blocReserve);
   corps.appendChild(aide);
   corps.appendChild(colonnes);
+  majReserve();
 
   return {
     noeud: corps,
@@ -943,8 +1002,9 @@ function moteurTransforme(ec) {
   if (ec.depart) {
     var d = el('div', 'depart');
     d.appendChild(btnHautParleur(ec.depart, 'Écouter la phrase de départ'));
-    d.appendChild(el('span', null, ec.depart));
-    d.onclick = function () { parler(ec.depart); };
+    var dt = el('span');
+    dt.appendChild(motsLisibles(ec.depart));
+    d.appendChild(dt);
     corps.appendChild(d);
   }
   var ta = el('textarea', 'reponse');
@@ -1076,6 +1136,14 @@ function ouvrirExo(exo) {
     if (ec.t === 'expl') {
       var box = el('div', 'corps explication');
       box.innerHTML = ec.html || '';
+      var tout = (box.textContent || '').trim();
+      rendreLisible(box);
+      if (tout) {
+        var tete = el('div', 'tete-lecon');
+        tete.appendChild(btnHautParleur(tout, 'Écouter toute la leçon'));
+        tete.appendChild(el('span', 'aide-txt', 'Cliquez un mot pour l’entendre.'));
+        box.insertBefore(tete, box.firstChild);
+      }
       zone.appendChild(box);
       carte.appendChild(zone);
       var suite = el('button', 'btn', i === ecrans.length - 1 ? 'Terminer' : 'Commencer');
@@ -1085,7 +1153,9 @@ function ouvrirExo(exo) {
       if (ec.consigne) {
         var cons = el('p', 'consigne');
         cons.appendChild(btnHautParleur(ec.consigne, 'Réécouter la consigne'));
-        cons.appendChild(el('span', null, ec.consigne));
+        var ct = el('span');
+        ct.appendChild(motsLisibles(ec.consigne));
+        cons.appendChild(ct);
         carte.appendChild(cons);
       }
       var m = (MOTEURS[ec.t] || moteurSouligne)(ec);
