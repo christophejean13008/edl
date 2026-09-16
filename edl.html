@@ -140,7 +140,21 @@ main{max-width:1080px;margin:0 auto;padding:22px 18px 80px}
 .consigne{
   font-weight:650;margin-bottom:16px;padding-left:12px;
   border-left:3px solid var(--jaune);
+  display:flex;gap:10px;align-items:flex-start;
 }
+.hp{
+  flex:none;border:1px solid var(--trait-fort);background:#fff;color:var(--encre-2);
+  border-radius:7px;padding:4px 6px;cursor:pointer;line-height:0;margin-top:1px;
+}
+.hp:hover{background:var(--jaune);color:var(--encre);border-color:var(--encre-2)}
+.depart{cursor:pointer;display:flex;gap:10px;align-items:center}
+.reglage{display:flex;align-items:center;gap:12px;margin:14px 0}
+.reglage label{flex:none;min-width:110px}
+.reglage input[type=range]{flex:1}
+.reglage select{flex:1;padding:8px 10px;border:1px solid var(--trait-fort);border-radius:8px;background:#fff;font:inherit;max-width:100%}
+.interrupteur{display:flex;align-items:center;gap:10px;cursor:pointer}
+.interrupteur input{width:20px;height:20px}
+#btnVoix[aria-pressed=false]{opacity:.55}
 .zone{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
 .zone .illus{width:190px;border-radius:8px;flex:none}
 .corps{flex:1;min-width:min(100%,320px)}
@@ -299,6 +313,8 @@ dialog::backdrop{background:rgba(23,35,61,.45)}
   </div>
   <select id="selEleve" title="Élève en cours"></select>
   <button id="btnEleves" title="Gérer les élèves">Élèves</button>
+  <button id="btnVoix" aria-pressed="true" title="Lecture à voix haute">Voix</button>
+  <button id="btnVoixReglages" title="Réglages de la voix">…</button>
   <button id="btnCatalogue">Exercices</button>
   <button id="btnBilan">Bilan</button>
   <button id="btnMoins" title="Réduire le texte">A-</button>
@@ -321,6 +337,27 @@ dialog::backdrop{background:rgba(23,35,61,.45)}
     </div>
     <ul id="listeEleves"></ul>
     <div class="barre"><button class="btn creux fermer">Fermer</button></div>
+  </div>
+</dialog>
+
+<dialog id="modaleVoix">
+  <div class="modale">
+    <h2>Lecture à voix haute</h2>
+    <p class="aide-txt">La consigne est lue au début de chaque écran. L’élève entend un mot ou une étiquette en cliquant dessus.</p>
+    <label class="interrupteur"><input type="checkbox" id="voixActive"> Activer la lecture</label>
+    <div class="reglage">
+      <label for="voixDebit">Vitesse</label>
+      <input type="range" id="voixDebit" min="0.5" max="1.3" step="0.1">
+      <span id="voixDebitVal" class="aide-txt"></span>
+    </div>
+    <div class="reglage">
+      <label for="voixNom">Voix</label>
+      <select id="voixNom"></select>
+    </div>
+    <div class="barre">
+      <button class="btn creux" id="voixEssai">Essayer</button>
+      <button class="btn fermer pousse">Fermer</button>
+    </div>
   </div>
 </dialog>
 
@@ -348,7 +385,7 @@ var CLE = 'grammaire456.v1';
 
 /* ============================ mémoire locale ============================ */
 var memoireOK = true;
-var etat = { eleves: [], actif: null, res: {}, prefs: { fs: 17, lisible: false } };
+var etat = { eleves: [], actif: null, res: {}, prefs: { fs: 17, lisible: false, voix: true, debit: 0.9, voixNom: null } };
 
 function charger() {
   try {
@@ -367,6 +404,56 @@ function resultats() {
   if (!etat.actif) return {};
   if (!etat.res[etat.actif]) etat.res[etat.actif] = {};
   return etat.res[etat.actif];
+}
+
+/* ============================ lecture à voix haute ============================ */
+var Voix = {
+  dispo: (typeof window !== 'undefined' && 'speechSynthesis' in window),
+  liste: [],
+  choisie: null
+};
+function chargerVoix() {
+  if (!Voix.dispo) return;
+  Voix.liste = window.speechSynthesis.getVoices().filter(function (v) {
+    return /^fr/i.test(v.lang);
+  });
+  if (!Voix.liste.length) Voix.liste = window.speechSynthesis.getVoices();
+  var voulue = etat.prefs.voixNom;
+  Voix.choisie = Voix.liste.filter(function (v) { return v.name === voulue; })[0]
+    || Voix.liste.filter(function (v) { return /^fr-FR/i.test(v.lang); })[0]
+    || Voix.liste[0] || null;
+}
+function parler(texte, forcer) {
+  if (!Voix.dispo || !texte) return;
+  if (!etat.prefs.voix && !forcer) return;
+  try {
+    var u = new window.SpeechSynthesisUtterance(String(texte).replace(/\s+/g, ' ').trim());
+    u.lang = 'fr-FR';
+    if (Voix.choisie) u.voice = Voix.choisie;
+    u.rate = etat.prefs.debit || 0.9;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  } catch (e) { /* navigateur sans synthèse vocale */ }
+}
+function taire() {
+  if (Voix.dispo) { try { window.speechSynthesis.cancel(); } catch (e) {} }
+}
+/** Bouton haut-parleur réutilisable. */
+function btnHautParleur(texte, titre) {
+  var b = el('button', 'hp');
+  b.type = 'button';
+  b.title = titre || 'Écouter';
+  b.setAttribute('aria-label', b.title);
+  b.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">'
+    + '<path fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4z"/>'
+    + '<path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M16.5 8.5a4.5 4.5 0 0 1 0 7M19 6a8 8 0 0 1 0 12"/>'
+    + '</svg>';
+  b.onclick = function (ev) { ev.stopPropagation(); parler(typeof texte === 'function' ? texte() : texte, true); };
+  return b;
+}
+/** Nettoie un libellé avant lecture (balises d'exercice, tirets décoratifs). */
+function pourLire(s) {
+  return String(s).replace(/[<>{}\[\]]/g, ' ').replace(/\s*\|\s*/g, ' ').replace(/^[\s-]+/, '').replace(/\s+/g, ' ').trim();
 }
 
 /* ============================ utilitaires ============================ */
@@ -477,6 +564,7 @@ function moteurSouligne(ec, couleurs) {
       s.dataset.attendu = j.marque || '';
       s.choix = null;
       s.onclick = function () {
+        parler(j.mot);
         if (couleurs) {
           if (!courante) return;
           s.choix = s.choix === courante ? null : courante;
@@ -548,6 +636,7 @@ function moteurTrous(ec) {
       t.tabIndex = 0;
       t.textContent = '\u00a0\u00a0\u00a0\u00a0\u00a0';
       t.onclick = function () {
+        if (t.rempli) parler(t.rempli.textContent);
         if (etqChoisie) { poser(t, etqChoisie); return; }
         if (t.rempli) { reprendre(t); return; }
         vise = vise === t ? null : t;
@@ -596,6 +685,7 @@ function moteurTrous(ec) {
       var b = el('button', 'etq', mot);
       b.setAttribute('aria-pressed', 'false');
       b.onclick = function () {
+        parler(mot);
         if (vise) { poser(vise, b); return; }
         etqChoisie = etqChoisie === b ? null : b;
         Array.prototype.forEach.call(boite.children, function (x) {
@@ -653,6 +743,7 @@ function moteurAssocie(ec) {
       b.place = -1;
       b.setAttribute('aria-pressed', 'false');
       b.onclick = function () {
+        parler(pourLire(it));
         choisi = choisi === b ? null : b;
         jetons.forEach(function (x) { x.setAttribute('aria-pressed', String(x === choisi)); });
       };
@@ -730,6 +821,7 @@ function moteurRelie(ec) {
     var a = el('button', 'plot', p[0]);
     a.idx = i; a.lie = null; a.setAttribute('aria-pressed', 'false');
     a.onclick = function () {
+      parler(pourLire(p[0]));
       if (a.lie) { delier(a); return; }
       selG = selG === a ? null : a;
       gauches.forEach(function (x) { x.setAttribute('aria-pressed', String(x === selG)); });
@@ -740,6 +832,7 @@ function moteurRelie(ec) {
     var b = el('button', 'plot', o.txt);
     b.idx = o.i; b.lie = null;
     b.onclick = function () {
+      parler(pourLire(o.txt));
       if (b.lie) { delier(b.lie); return; }
       if (!selG) return;
       if (selG.lie) delier(selG);
@@ -821,6 +914,7 @@ function moteurQCM(ec) {
     b.appendChild(c); b.appendChild(t);
     b.rep = r; b.zoneTexte = t;
     b.onclick = function () {
+      parler(r.txt);
       b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
     };
     choix.push(b); boite.appendChild(b);
@@ -848,7 +942,9 @@ function moteurTransforme(ec) {
   var corps = el('div', 'corps');
   if (ec.depart) {
     var d = el('div', 'depart');
+    d.appendChild(btnHautParleur(ec.depart, 'Écouter la phrase de départ'));
     d.appendChild(el('span', null, ec.depart));
+    d.onclick = function () { parler(ec.depart); };
     corps.appendChild(d);
   }
   var ta = el('textarea', 'reponse');
@@ -896,6 +992,7 @@ function moteurDesordre(ec) {
     var b = el('button', 'etq', o.s);
     b.idx = o.i;
     b.onclick = function () {
+      parler(o.s);
       if (b.parentNode === zoneP) { zoneR.appendChild(b); pris.push(b); }
       else { zoneP.appendChild(b); pris = pris.filter(function (x) { return x !== b; }); }
     };
@@ -956,7 +1053,7 @@ function ouvrirExo(exo) {
     g.appendChild(el('h1', null, exo.titre));
     entete.appendChild(g);
     var quitter = el('button', 'btn creux', 'Fermer');
-    quitter.onclick = function () { if (cumulTotal) enregistrer(); vueCatalogue(); };
+    quitter.onclick = function () { taire(); if (cumulTotal) enregistrer(); vueCatalogue(); };
     entete.appendChild(quitter);
     main.appendChild(entete);
 
@@ -985,7 +1082,12 @@ function ouvrirExo(exo) {
       suite.onclick = suivant;
       barre.appendChild(suite);
     } else {
-      if (ec.consigne) carte.appendChild(el('p', 'consigne', ec.consigne));
+      if (ec.consigne) {
+        var cons = el('p', 'consigne');
+        cons.appendChild(btnHautParleur(ec.consigne, 'Réécouter la consigne'));
+        cons.appendChild(el('span', null, ec.consigne));
+        carte.appendChild(cons);
+      }
       var m = (MOTEURS[ec.t] || moteurSouligne)(ec);
       zone.appendChild(m.noeud);
       carte.appendChild(zone);
@@ -1028,6 +1130,7 @@ function ouvrirExo(exo) {
     carte.appendChild(barre);
     main.appendChild(carte);
     window.scrollTo(0, 0);
+    if (ec.t !== 'expl' && ec.consigne) parler(ec.consigne);
   }
 
   function suivant() {
@@ -1358,6 +1461,43 @@ function majBandeau(main) {
   if (main) main.appendChild(b);
 }
 
+/* ============================ réglages de la voix ============================ */
+function modaleVoix() {
+  var d = $('#modaleVoix');
+  var actif = $('#voixActive'), deb = $('#voixDebit'), sel = $('#voixNom');
+  chargerVoix();
+  actif.checked = !!etat.prefs.voix;
+  deb.value = etat.prefs.debit || 0.9;
+  $('#voixDebitVal').textContent = Number(deb.value).toFixed(1).replace('.', ',');
+  sel.innerHTML = '';
+  if (!Voix.dispo || !Voix.liste.length) {
+    sel.appendChild(new Option('Aucune voix détectée dans ce navigateur', ''));
+    sel.disabled = true;
+  } else {
+    sel.disabled = false;
+    Voix.liste.forEach(function (v) { sel.appendChild(new Option(v.name + ' (' + v.lang + ')', v.name)); });
+    sel.value = (Voix.choisie && Voix.choisie.name) || '';
+  }
+  actif.onchange = function () { etat.prefs.voix = actif.checked; sauver(); majBoutonVoix(); };
+  deb.oninput = function () {
+    etat.prefs.debit = parseFloat(deb.value);
+    $('#voixDebitVal').textContent = Number(deb.value).toFixed(1).replace('.', ',');
+    sauver();
+  };
+  sel.onchange = function () { etat.prefs.voixNom = sel.value; chargerVoix(); sauver(); };
+  $('#voixEssai').onclick = function () {
+    parler('Soulignez les verbes conjugués dans les phrases suivantes.', true);
+  };
+  d.showModal();
+}
+function majBoutonVoix() {
+  var b = $('#btnVoix');
+  var on = !!etat.prefs.voix && Voix.dispo;
+  b.setAttribute('aria-pressed', String(on));
+  b.textContent = on ? '\uD83D\uDD0A Voix' : '\uD83D\uDD07 Voix';
+  b.title = on ? 'Lecture à voix haute activée' : 'Lecture à voix haute coupée';
+}
+
 /* ============================ démarrage ============================ */
 charger();
 appliquerPrefs();
@@ -1369,8 +1509,20 @@ $('#selEleve').onchange = function () {
   vueCatalogue();
 };
 $('#btnEleves').onclick = modaleEleves;
-$('#btnBilan').onclick = vueBilan;
-$('#btnCatalogue').onclick = vueCatalogue;
+$('#btnVoix').onclick = function (e) {
+  if (e.shiftKey || e.altKey) { modaleVoix(); return; }
+  etat.prefs.voix = !etat.prefs.voix;
+  if (!etat.prefs.voix) taire();
+  sauver(); majBoutonVoix();
+};
+$('#btnVoixReglages').onclick = modaleVoix;
+if (Voix.dispo) {
+  chargerVoix();
+  window.speechSynthesis.onvoiceschanged = chargerVoix;
+}
+majBoutonVoix();
+$('#btnBilan').onclick = function () { taire(); vueBilan(); };
+$('#btnCatalogue').onclick = function () { taire(); vueCatalogue(); };
 $('#btnPlus').onclick = function () { etat.prefs.fs = Math.min(26, etat.prefs.fs + 1); appliquerPrefs(); sauver(); };
 $('#btnMoins').onclick = function () { etat.prefs.fs = Math.max(14, etat.prefs.fs - 1); appliquerPrefs(); sauver(); };
 $('#btnLisible').onclick = function () { etat.prefs.lisible = !etat.prefs.lisible; appliquerPrefs(); sauver(); };
